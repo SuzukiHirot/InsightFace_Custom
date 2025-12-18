@@ -1,0 +1,46 @@
+mbf, r50, r100 というのは、顔の特徴量を抽出するニューラルネットワーク（バックボーン・アーキテクチャ）の種類を指す略語です。
+
+    r50: ResNet-50 (Residual Network 50層)。精度と速度のバランスが良く、顔認識の標準的なモデルとして広く使われています。
+
+    r100: ResNet-100 (Residual Network 100層)。r50 よりも深く（層が多く）、計算量は増えますが、その分より高い認識精度が期待できます。
+
+    mbf: MobileFaceNet。モバイルデバイスなどの低リソース環境向けに設計された、非常に軽量で高速なモデルです。r50 などと比べると精度は若干劣りますが、速度が求められる場合に適しています。
+
+configs/ ディレクトリにあるファイル名（例: ms1mv3_r50_onegpu.py）は、「MS1MV3データセットで ResNet-50 (r50) を 1GPU で学習する設定」という意味になります。
+
+その他
+1. wf42m_pfc02_8gpus_r50_bs4k.py
+
+    wf42m: データセット。おそらく「WebFace 42Million」の略です。4200万枚の画像が含まれる超大規模なWebFaceデータセットを指します。
+
+    pfc02: 学習手法。「Partial FC (v0.2?)」の略だと思われます。これは、config.num_classes（＝人数）が数百万と非常に多い場合でも効率的に学習（分類）できるようにする技術です。
+
+    8gpus: 環境。「8台のGPU」で分散学習（DDP）をすることを前提とした設定です。
+
+    r50: モデル。「ResNet-50」アーキテクチャを使用することを示します。
+
+    bs4k: バッチサイズ。「Batch Size 4K (4000 or 4096)」の略です。8GPUの合計でバッチサイズが4096（例: 1GPUあたり512）になるよう設定されています。
+
+    → 要約: 「WebFace 42Mデータセットを使い、Partial FCという手法で、ResNet-50モデルを、8GPU・合計バッチサイズ4096で学習する」設定です。
+
+2. wf42m_pfc03_40epoch_8gpu_vit_b.py
+
+    wf42m: 上記と同じ「WebFace 42Million」データセット。
+
+    pfc03: 「Partial FC」の別バージョン、またはp=0.3のようなサンプリングレートの設定かもしれません。
+
+    40epoch: 学習期間。「40エポック」学習を回す設定です。
+
+    8gpu: 「8台のGPU」で学習する設定。
+
+    vit_b: モデル。「Vision Transformer - Base」モデルを使用することを示します。ResNet (r50) とは異なる、より新しいTransformerベースのアーキテクチャです。
+
+    → 要約: 「WebFace 42Mデータセットを使い、Partial FCで、Vision Transformer (Base)モデルを、8GPUで40エポック学習する」設定です。
+
+3. wf42m_pfc03_40epoch_8gpu_vit_t.py
+
+    wf42m, pfc03, 40epoch, 8gpu は上記2.と同じです。
+
+    vit_t: モデル。「Vision Transformer - Tiny」モデルを使用することを示します。vit_b (Base) よりも小型で高速なTransformerモデルです。
+
+    → 要約: 「WebFace 42Mデータセットを使い、Partial FCで、Vision Transformer (Tiny)モデルを、8GPUで40エポック学習する」設定です。

@@ -1,0 +1,33 @@
+services:
+  insightface:
+    stdin_open: true # 標準入出力とエラー出力をコンテナに結びつける, docker run -i に相当
+    tty: true # キーボードによる入力をコンテナに結びつける, docker run -t に相当
+    build: . # docker-compose.yml から見た Dockerfile のあるディレクトリのパス
+    shm_size: '16gb' # 共有メモリのサイズ (PyTorchのデータローダーなどで重要)
+    container_name: 'insightface_container' # コンテナの名前
+    volumes:
+      # マウント元:マウント先
+      # (注意) マウント元のパスは、ご自身の環境に合わせて修正してください。
+      - type: bind
+        source: /home/suzuki/InsightFace_Custom # InsightFaceのリポジトリをクローンしたパス
+        target: /workspace
+      - type: bind
+        source: /home/suzuki/clearml.conf # clearml.conf (必要に応じて)
+        target: /workspace/clearml.conf
+      - type: bind
+        source: /home/suzuki/TestDataSets # テストデータセットのパス
+        target: /workspace/TestDataSets 
+      - type: bind
+        source: /home/suzuki/TrainDataSets # 学習データセットのパス
+        target: /workspace/TrainDataSets/
+    image: insightface_image # ビルドするイメージ名
+    deploy:
+      resources:
+        limits:
+          memory: 64gb # メモリ上限
+        reservations:
+          devices:
+            - driver: nvidia
+              # count: 1  <-- count の代わりに device_ids を使用します
+              device_ids: ['0'] # GPU 1 を指定
+              capabilities: [gpu]
