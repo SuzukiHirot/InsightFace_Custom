@@ -83,7 +83,7 @@ class CallBackVerification(object):
             if name == 'lfw':
                 path = os.path.join(val_root_path, "LFW", "lfw.bin")
             elif name == 'cfp_fp':
-                path = os.path.join(val_root_path, "CFP-FP", "cfp_fp.bin")
+                path = os.path.join(val_root_path, "CFP_FP", "cfp_fp.bin")
             elif name == 'agedb_30':
                 path = os.path.join(val_root_path, "AgeDB", "agedb_30.bin")
             elif name == 'calfw':

@@ -110,90 +110,128 @@ class CosFace(torch.nn.Module):
 # Boundary Margin Implementations
 # -----------------------------------------------------------------------------
 
+
 class BoundaryMargin(nn.Module):
-    def __init__(self, in_feature=128, out_feature=10575, s=32.0, m=0.4, easy_margin=False, epoch_start=25):
-        super(BoundaryMargin, self).__init__()
+    """
+    BoundaryFace (paper-faithful, interface-compatible)
+
+    forward(x, label, epoch, img_path, out_dir)
+    return: output, final(boundary loss), rectified_label
+    """
+
+    def __init__(
+        self,
+        in_feature=128,
+        out_feature=10575,
+        s=32.0,
+        m=0.4,
+        easy_margin=False,
+        epoch_start=25
+    ):
+        super().__init__()
+
         self.in_feature = in_feature
         self.out_feature = out_feature
         self.s = s
         self.m = m
+        self.epoch_start = epoch_start
+        self.easy_margin = easy_margin
+
         self.weight = Parameter(torch.Tensor(out_feature, in_feature))
         nn.init.xavier_uniform_(self.weight)
 
-        self.easy_margin = easy_margin
         self.cos_m = math.cos(m)
         self.sin_m = math.sin(m)
-
-        # make the function cos(theta+m) monotonic decreasing while theta in [0°,180°]
         self.th = math.cos(math.pi - m)
         self.mm = math.sin(math.pi - m) * m
 
-        self.epoch_start = epoch_start
-
     def forward(self, x, label, epoch, img_path, out_dir):
-        # cos(theta)
-        cosine = F.linear(F.normalize(x), F.normalize(self.weight))
-        # cos(theta + m)
-        sine = torch.sqrt(1.0 - torch.pow(cosine, 2))
+        """
+        Args:
+            x: feature (B, F)
+            label: GT label (B,)
+            epoch: current epoch
+            img_path: list[str]
+            out_dir: str
+        """
+
+        # -------------------------
+        # cosine(theta)
+        # -------------------------
+        cosine = F.linear(
+            F.normalize(x),
+            F.normalize(self.weight)
+        )
+
+        sine = torch.sqrt(torch.clamp(1.0 - cosine ** 2, min=1e-9))
         phi = cosine * self.cos_m - sine * self.sin_m
 
         if self.easy_margin:
             phi = torch.where(cosine > 0, phi, cosine)
         else:
-            phi = torch.where((cosine - self.th) > 0, phi, cosine - self.mm)
+            phi = torch.where(cosine > self.th, phi, cosine - self.mm)
 
         one_hot = torch.zeros_like(cosine)
-        one_hot.scatter_(1, label.view(-1, 1), 1)
-        
-        if epoch > self.epoch_start:
-            right2 = one_hot * cosine.detach()
-            left2 = (1.0 - one_hot) * phi.detach()
-            left_max2, argmax2 = torch.max(left2.detach(), dim=1)
-            max_index2 = argmax2.detach()
-            right_max2, _ = torch.max(right2.detach(), dim=1)
-            sub2 = left_max2 - right_max2
-            zero2 = torch.zeros_like(sub2)
-            temp2 = torch.where(sub2 > 0, sub2, zero2)
-            
-            non_zero_index2 = torch.nonzero(temp2.detach())
-            numpy_index2 = torch.squeeze(non_zero_index2, 1)
-            
-            # Ensure directory exists if needed, or catch error if strict
-            # Here assuming out_dir exists as per original code logic
-            if img_path is not None:
-                try:
+        one_hot.scatter_(1, label.view(-1, 1), 1.0)
+
+        rectified_label = label
+        final = torch.zeros(1, device=x.device)
+
+        # ======================================================
+        # BoundaryFace logic (epoch >= epoch_start)
+        # ======================================================
+        if epoch >= self.epoch_start:
+            with torch.no_grad():
+                # GT cosine
+                gt_cos = torch.sum(one_hot * cosine, dim=1)
+
+                # impostor cosine
+                impostor_cos = cosine * (1.0 - one_hot)
+                max_impostor_cos, max_impostor_idx = impostor_cos.max(dim=1)
+
+                # Closed-set noise判定
+                csn_mask = max_impostor_cos > gt_cos
+
+                # ラベル修正
+                rectified_label = torch.where(
+                    csn_mask,
+                    max_impostor_idx,
+                    label
+                )
+
+                # ログ出力（元コード互換）
+                if img_path is not None and out_dir is not None:
+                    os.makedirs(out_dir, exist_ok=True)
                     file_path = os.path.join(out_dir, f'BoundaryTXT{epoch}.txt')
+
                     with open(file_path, 'a') as f:
-                        for index in numpy_index2:
-                            one_hot_line = torch.zeros((1, self.out_feature)).to(x.device)
-                            one_hot_line.scatter_(1, max_index2[index].unsqueeze(-1).view(-1, 1), 1)
-                            one_hot[index] = one_hot_line
-                            
-                            # Handle path if it's a list or tuple from dataloader
-                            current_path = img_path[index] if isinstance(img_path, (list, tuple)) else str(img_path[index])
-                            f.write(f"{current_path}\t{str(max_index2.cpu().numpy()[index])}\n")
-                except IOError:
-                    pass # Handle IO errors gracefully if needed
+                        for i in torch.nonzero(csn_mask).squeeze(1):
+                            path_i = img_path[i]
+                            f.write(
+                                f"{path_i}\t{rectified_label[i].item()}\n"
+                            )
 
-            rectified_label = torch.topk(one_hot, 1)[1].squeeze(1).to(x.device)
-            right = one_hot * phi
-            left = (1.0 - one_hot) * cosine
-            output = left + right
-            output = output * self.s
+            # -------------------------
+            # Boundary loss (hard samples)
+            # -------------------------
+            margin_gap = max_impostor_cos - gt_cos
 
-            left_max, _ = torch.max(left, dim=1)
-            right_max, _ = torch.max(right, dim=1)
-            sub = left_max - right_max
-            zero = torch.zeros_like(sub)
-            temp = torch.where(sub > 0, sub, zero)
-            final = torch.mean(temp) * math.pi
+            # 境界付近（越えてはいない）
+            hard_mask = (margin_gap < 0) & (margin_gap > -self.m)
 
-        else:
-            # epoch <= self.epoch_start
-            rectified_label = label
-            final = torch.tensor(0.0).to(x.device)
-            output = (one_hot * phi) + ((1.0 - one_hot) * cosine)
-            output = output * self.s
+            if hard_mask.any():
+                final = torch.mean(
+                    (-margin_gap[hard_mask])
+                ) * math.pi
+
+        one_hot_final = torch.zeros_like(cosine)
+        one_hot_final.scatter_(1, rectified_label.view(-1, 1), 1.0)
+
+        output = (
+            one_hot_final * phi +
+            (1.0 - one_hot_final) * cosine
+        )
+        output = output * self.s
 
         return output, final, rectified_label
 

@@ -99,7 +99,6 @@ def main(args):
     else:
         cfg.clearml_task = None
         cfg.clearml_logger = None
-
     
     wandb_logger = None
     if cfg.using_wandb:
@@ -467,7 +466,7 @@ def main(args):
                     wandb_logger.log(log_dict)
                 
                 # ClearML Logging
-                if rank == 0 and cfg.clearml_logger:
+                if rank == 0 and cfg.clearml_logger and (global_step % 500 == 0):
                     try:
                         current_lr = lr_scheduler.get_last_lr()[0]
                         cfg.clearml_logger.report_scalar(
